@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+backend/web-venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# Build outputs
+/dist/
+/build/
+/.vite/
+/vite-dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Coverage
+/coverage
+/.nyc_output
+
+# Temporary files
+tmp/
+backend/tmp/
+.DS_Store
+*.tmp
+
+# Python
+.pytest_cache/
+.coverage
+htmlcov/
+.pytest_cache/
+.hypothesis/
+.tox/
+.mypy_cache/
+
+# Vite
+.svelte-kit/
+.output/
+.vercel/
+netlify/
+
+# Testing
+test-results/
