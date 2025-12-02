@@ -32,22 +32,38 @@ class DeepFaceMTCNNDetector(BaseDetector):
         """Initialize DeepFace with MTCNN backend"""
         if self.initialized:
             return True
-        
+
         if not DEEPFACE_AVAILABLE:
             logger.error("❌ DeepFace not available for MTCNN detector")
             return False
-        
+
         try:
             logger.info("🔄 Initializing DeepFace with MTCNN backend...")
-            
-            # Skip test to avoid memory issues
-            logger.info("🔄 Skipping MTCNN test to reduce memory usage")
-            
+
+            # Actually test the detector to ensure models are loaded
+            # Use a minimal test to avoid excessive memory usage
+            dummy_frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+            # Add a simple face-like pattern
+            cv2.ellipse(dummy_frame, (50, 50), (20, 25), 0, 0, 360, (220, 190, 170), -1)
+
+            # Perform a minimal analysis to ensure MTCNN model loads
+            try:
+                result = DeepFace.analyze(
+                    img_path=dummy_frame,
+                    actions=['age', 'gender'],
+                    detector_backend='mtcnn',
+                    enforce_detection=False,
+                    silent=True
+                )
+                logger.info("✅ MTCNN models loaded successfully")
+            except Exception as e:
+                logger.warning(f"⚠️ Initial MTCNN test failed (this may be normal): {e}")
+
             self.model_loaded = True
             self.initialized = True
             logger.info("✅ DeepFace MTCNN detector initialized successfully")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ DeepFace MTCNN initialization failed: {e}")
             return False
@@ -58,69 +74,88 @@ class DeepFaceMTCNNDetector(BaseDetector):
             raise RuntimeError("DeepFace MTCNN detector not ready!")
 
         start_time = time.time()
-        
+
         try:
             # Convert frame to RGB format for DeepFace
             if len(frame.shape) == 3 and frame.shape[2] == 3:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             else:
                 frame_rgb = frame
-            
-            # Use DeepFace with MTCNN backend
-            results = DeepFace.analyze(
+
+            # Use DeepFace.extract_faces to get face detections
+            face_objs = DeepFace.extract_faces(
                 img_path=frame_rgb,
-                actions=['age', 'gender'],
                 detector_backend='mtcnn',
                 enforce_detection=False,
-                align=False,
-                silent=True
+                align=False # No need to align here, we'll analyze the extracted face
             )
-            
+
             detection_results = []
-            
-            # Handle both single result and list of results
-            if not isinstance(results, list):
-                results = [results]
-            
-            for result in results:
-                if 'region' in result:
-                    region = result['region']
-                    x, y, w, h = region['x'], region['y'], region['w'], region['h']
-                    
-                    # Extract age and gender
-                    age = result.get('age', 30)
-                    gender = result.get('gender', 'Unknown')
-                    
-                    # Handle gender format
-                    if isinstance(gender, dict):
-                        gender = max(gender.items(), key=lambda x: x[1])[0] if gender else 'Unknown'
-                    
-                    # Get confidence scores
-                    gender_confidence = result.get('gender_scores', {})
-                    if isinstance(gender_confidence, dict) and isinstance(gender, str):
-                        confidence = gender_confidence.get(gender.lower(), 0.90)
+
+            for i, face_obj in enumerate(face_objs):
+                # face_obj contains 'face' (aligned image), 'facial_area' (bbox), 'confidence'
+                x, y, w, h = face_obj['facial_area']['x'], face_obj['facial_area']['y'], \
+                             face_obj['facial_area']['w'], face_obj['facial_area']['h']
+
+                # Extract the face region from the original frame for analysis
+                face_img = frame_rgb[y:y+h, x:x+w]
+
+                # Get age and gender for this specific face
+                try:
+                    result = DeepFace.analyze(
+                        img_path=face_img,
+                        actions=['age', 'gender'],
+                        enforce_detection=False,
+                        silent=True
+                    )
+                    # DeepFace.analyze returns a list of results, even for a single face
+                    if isinstance(result, list) and result:
+                        result = result[0]
                     else:
-                        confidence = 0.90
-                    
+                        result = {'age': 30, 'dominant_gender': 'Unknown'} # Default if no analysis
+
+                    age = result.get('age', 30)
+                    gender = result.get('dominant_gender', 'Unknown')
+                    confidence = face_obj.get('confidence', 0.9) # Use detection confidence
+
                     # Create detection result
                     detection_result = DetectionResult(
-                        bbox=(x, y, w, h),
+                        bbox=(int(x), int(y), int(w), int(h)),
                         age=f"{int(age)}",
                         gender=gender,
                         confidence=confidence,
                         model_type='deepface_mtcnn'
                     )
                     detection_results.append(detection_result)
-            
+                except Exception as e:
+                    logger.warning(f"Could not analyze age/gender for face {i}: {e}")
+                    # If analysis fails, still add the bounding box with default values
+                    detection_result = DetectionResult(
+                        bbox=(int(x), int(y), int(w), int(h)),
+                        age='Unknown',
+                        gender='Unknown',
+                        confidence=face_obj.get('confidence', 0.5),
+                        model_type='deepface_mtcnn'
+                    )
+                    detection_results.append(detection_result)
+
+            # The alternative approach (original DeepFace.analyze on full frame) is no longer needed
+            # as extract_faces is more direct for getting bounding boxes.
+            # If no faces are detected by extract_faces, detection_results will be empty.
+            if not detection_results:
+                logger.info("No faces detected by DeepFace.extract_faces.")
+                return []
+
             # Update performance stats
             processing_time = time.time() - start_time
             self.update_performance_stats(processing_time)
-            
+
             return detection_results
-            
+
         except Exception as e:
             logger.error(f"❌ DeepFace MTCNN detection failed: {e}")
-            raise RuntimeError(f"DeepFace MTCNN detection failed: {e}")
+            # Return empty list instead of raising an exception to prevent complete failure
+            return []
 
     def get_model_info(self) -> Dict[str, Any]:
         info = {

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Video, Upload, BarChart3, Store } from 'lucide-react';
+import { Video, Upload, BarChart3, Store, Camera } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { UploadPage } from './components/UploadPage';
 import { ComparisonPage } from './components/ComparisonPage';
 import { StoresPage } from './components/StoresPage';
+import { RealTimeAnalysis } from './components/RealTimeAnalysis';
 
-type TabType = 'dashboard' | 'upload' | 'comparison' | 'stores';
+type TabType = 'dashboard' | 'upload' | 'comparison' | 'stores' | 'realtime';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('stores');
@@ -92,6 +93,19 @@ export default function App() {
               Stores
             </div>
           </button>
+          <button
+            onClick={() => setActiveTab('realtime')}
+            className={`py-4 px-2 border-b-2 transition-colors ${
+              activeTab === 'realtime'
+                ? 'border-blue-500 text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Camera className="w-4 h-4" />
+              Real-time
+            </div>
+          </button>
         </div>
       </nav>
 
@@ -101,6 +115,7 @@ export default function App() {
         {activeTab === 'upload' && <UploadPage selectedStore={selectedStore} />}
         {activeTab === 'comparison' && <ComparisonPage />}
         {activeTab === 'stores' && <StoresPage />}
+        {activeTab === 'realtime' && <RealTimeAnalysis />}
       </main>
     </div>
   );

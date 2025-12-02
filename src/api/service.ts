@@ -436,6 +436,31 @@ class ApiService {
       throw error;
     }
   }
+
+  // Real-time frame analysis
+  async realtimeAnalyze(request: ImageAnalysisRequest): Promise<ImageAnalysisResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/realtime/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: request.image,
+          confidence_threshold: request.confidence_threshold
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Real-time analysis failed:', error);
+      throw error;
+    }
+  }
 }
 
 export const apiService = new ApiService();

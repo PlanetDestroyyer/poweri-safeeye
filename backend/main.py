@@ -48,6 +48,7 @@ app.add_middleware(
         "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
+        "http://localhost:5173", # Added for Vite development server
         "*"  # Allow all for development
     ],
     allow_credentials=True,
@@ -72,12 +73,25 @@ class ImageAnalysisRequest(BaseModel):
     confidence_threshold: float = 0.7
     return_annotated_image: bool = False
 
+class RealTimeAnalysisRequest(BaseModel):
+    image: str  # Base64 encoded image
+    confidence_threshold: float = 0.7
+
 class DetectionResponse(BaseModel):
     face_id: int
     bounding_box: dict
     age: dict
     gender: dict
     overall_confidence: float
+
+class RealTimeAnalysisResponse(BaseModel):
+    timestamp: str
+    image_info: dict
+    detection_count: int
+    confidence_threshold: float
+    detections: List[DetectionResponse]
+    analytics: dict
+
 class VideoJobCreateResponse(BaseModel):
     job_id: str
     status: str
@@ -162,6 +176,7 @@ async def root():
             "DELETE /video/cleanup": "Cleanup old jobs and temporary files",
             "GET /detector/info": "Get detector information",
             "GET /performance": "Get performance statistics",
+            "POST /realtime/analyze": "Analyze single frame in real-time",
             "WS /ws/{job_id}": "WebSocket for real-time updates"
         }
     }
@@ -661,6 +676,109 @@ async def get_performance():
         "performance": detector.get_performance_stats(),
         "timestamp": datetime.now().isoformat()
     }
+
+@app.post("/realtime/analyze", response_model=RealTimeAnalysisResponse)
+async def realtime_analyze(request: RealTimeAnalysisRequest):
+    """
+    Real-time frame analysis for live camera feeds
+    This endpoint is optimized for quick processing of individual frames
+    """
+    try:
+        # Decode base64 image
+        try:
+            if request.image.startswith('data:image'):
+                image_data = base64.b64decode(request.image.split(',')[1])
+            else:
+                image_data = base64.b64decode(request.image)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 image data: {str(e)}")
+        
+        # Process image
+        image = Image.open(io.BytesIO(image_data))
+        
+        # Convert PIL to OpenCV format
+        frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        
+        # Detect faces
+        if not detector.is_ready():
+            raise HTTPException(status_code=503, detail="Detector not ready")
+        
+        detection_results = detector.detect_faces(frame)
+        
+        # Convert DetectionResult objects to dictionaries
+        results = [result.to_dict() for result in detection_results]
+        
+        # Filter by confidence threshold
+        filtered_results = [
+            r for r in results 
+            if r['confidence'] >= request.confidence_threshold
+        ]
+        
+        # Prepare response
+        response_data = {
+            "timestamp": datetime.now().isoformat(),
+            "image_info": {
+                "width": frame.shape[1],
+                "height": frame.shape[0],
+                "channels": frame.shape[2] if len(frame.shape) > 2 else 1
+            },
+            "detection_count": len(filtered_results),
+            "confidence_threshold": request.confidence_threshold,
+            "detections": []
+        }
+        
+        # Process each detection
+        for i, result in enumerate(filtered_results):
+            detection = {
+                "face_id": i + 1,
+                "bounding_box": {
+                    "x": int(result['bbox'][0]),
+                    "y": int(result['bbox'][1]),
+                    "width": int(result['bbox'][2]),
+                    "height": int(result['bbox'][3])
+                },
+                "age": {
+                    "range": result['age'],
+                    "confidence": float(result['confidence'])
+                },
+                "gender": {
+                    "prediction": result['gender'],
+                    "confidence": float(result['confidence'])
+                },
+                "overall_confidence": float(result['confidence'])
+            }
+            response_data["detections"].append(detection)
+        
+        # Calculate analytics
+        analytics = {
+            "totalFaces": len(filtered_results),
+            "ageDistribution": {},
+            "genderDistribution": {"male": 0, "female": 0},
+            "averageFaces": len(filtered_results)
+        }
+        
+        for result in filtered_results:
+            age = result['age']
+            gender = result['gender'].lower()
+            
+            if age not in analytics["ageDistribution"]:
+                analytics["ageDistribution"][age] = 0
+            analytics["ageDistribution"][age] += 1
+            
+            if 'male' in gender and 'female' not in gender:
+                analytics["genderDistribution"]["male"] += 1
+            elif 'female' in gender:
+                analytics["genderDistribution"]["female"] += 1
+        
+        response_data["analytics"] = analytics
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing real-time frame: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing frame: {str(e)}")
 
 def _process_video_job(job_id: str, input_path: str, confidence_threshold: float = 0.7, return_annotated: bool = True):
     """
